@@ -30,7 +30,9 @@ class JournalPaper:
         # Load xcolor first as it's needed by lstset
         doc.packages.append(Package("xcolor"))
         # NeurIPS style loads Times and natbib automatically
-        doc.packages.append(NoEscape(r"\usepackage[preprint]{neurips_2023}"))
+        doc.packages.append(
+            NoEscape(r"\usepackage[preprint]{../../../common/neurips_2023}")
+        )
         doc.packages.append(Package("inputenc", options="utf8"))
         doc.packages.append(Package("amsmath"))
         doc.packages.append(
