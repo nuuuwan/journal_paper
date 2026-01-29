@@ -1,6 +1,6 @@
 import argparse
 
-from jp.core.JournalPaper import JournalPaper
+from jp import JournalPaper
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Build a journal paper")
