@@ -1,6 +1,6 @@
 import json
 import os
-import subprocess
+import shutil
 from pathlib import Path
 
 from pylatex import Command, Document, Package
@@ -110,7 +110,7 @@ class JournalPaper:
         self._setup_title_and_authors(doc)
         return doc
 
-    def _add_document_content(self, doc, tex_files, has_bibliography):
+    def _add_document_content(self, doc, tex_files):
         """Add maketitle, tex files, and bibliography to the document."""
         if self.metadata:
             doc.append(NoEscape(r"\maketitle"))
@@ -118,50 +118,35 @@ class JournalPaper:
         for tex_file in tex_files:
             doc.append(NoEscape(f"\\input{{../{tex_file.name}}}"))
 
-        if has_bibliography:
-            # NeurIPS uses natbib with specific style
-            doc.append(NoEscape(r"\bibliographystyle{plainnat}"))
-            doc.append(NoEscape(r"\bibliography{../refs}"))
+        # NeurIPS uses natbib with specific style
+        doc.append(NoEscape(r"\bibliographystyle{plainnat}"))
+        doc.append(NoEscape(r"\bibliography{../refs}"))
 
-    def _compile_with_bibliography(self, doc, compiled_dir, output_path):
-        """Run the full LaTeX compilation cycle with BibTeX using subprocess."""
+    def _compile_with_bibliography(self, doc, output_path):
+        """Run the full LaTeX compilation cycle with BibTeX using PyLaTeX."""
         # Set TEXINPUTS to include the common directory
         common_dir = os.path.abspath(
             os.path.join(os.path.dirname(__file__), "../../../common")
         )
-        env = os.environ.copy()
-        env["TEXINPUTS"] = common_dir + os.pathsep + env.get("TEXINPUTS", "")
 
-        # First pdflatex pass
-        subprocess.run(
-            ["pdflatex", "-interaction=nonstopmode", "main.tex"],
-            cwd=compiled_dir,
-            check=True,
-            env=env,
-        )
+        # Temporarily set TEXINPUTS environment variable
+        original_texinputs = os.environ.get("TEXINPUTS", "")
+        os.environ["TEXINPUTS"] = common_dir + os.pathsep + original_texinputs
 
-        # Run bibtex
-        subprocess.run(
-            ["bibtex", "main"], cwd=compiled_dir, check=True, env=env
-        )
-
-        # Second pdflatex pass
-        subprocess.run(
-            ["pdflatex", "-interaction=nonstopmode", "main.tex"],
-            cwd=compiled_dir,
-            check=True,
-            env=env,
-        )
-
-        # Third pdflatex pass
-        subprocess.run(
-            ["pdflatex", "-interaction=nonstopmode", "main.tex"],
-            cwd=compiled_dir,
-            check=True,
-            env=env,
-        )
-
-        return output_path + ".pdf"
+        try:
+            # Use generate_pdf with compiler_args to run bibtex
+            doc.generate_pdf(
+                filepath=output_path,
+                clean_tex=False,
+                compiler="pdflatex",
+                compiler_args=["-interaction=nonstopmode"],
+            )
+        finally:
+            # Restore original TEXINPUTS
+            if original_texinputs:
+                os.environ["TEXINPUTS"] = original_texinputs
+            else:
+                os.environ.pop("TEXINPUTS", None)
 
     def build(self):
         """Build latex files and compile into PDF."""
@@ -169,40 +154,25 @@ class JournalPaper:
         tex_files = self.get_tex_files()
 
         bib_path = os.path.join(self.dir_path, "refs.bib")
-        has_bibliography = os.path.exists(bib_path)
+        assert os.path.exists(
+            bib_path
+        ), "refs.bib file is required for bibliography."
 
-        self._add_document_content(doc, tex_files, has_bibliography)
+        self._add_document_content(doc, tex_files)
 
         compiled_dir = os.path.join(self.dir_path, "__compiled")
+        shutil.rmtree(compiled_dir, ignore_errors=True)
         os.makedirs(compiled_dir, exist_ok=True)
         output_path = os.path.join(compiled_dir, "main")
 
         doc.generate_tex(filepath=output_path)
+        self._compile_with_bibliography(doc, output_path)
 
-        # Set TEXINPUTS to include the common directory for PDF generation
-        common_dir = os.path.abspath(
-            os.path.join(os.path.dirname(__file__), "../../../common")
-        )
-        env = os.environ.copy()
-        env["TEXINPUTS"] = common_dir + os.pathsep + env.get("TEXINPUTS", "")
-
-        if has_bibliography:
-            pdf_path = self._compile_with_bibliography(
-                doc, compiled_dir, output_path
-            )
+        if os.path.exists(f"{output_path}.tex"):
+            print(f"✅ {output_path}.tex")
+            if os.path.exists(f"{output_path}.pdf"):
+                print(f"✅ {output_path}.pdf")
+            else:
+                print("❌ PDF compilation failed.")
         else:
-            # For non-bibliography case, temporarily set TEXINPUTS
-            original_texinputs = os.environ.get("TEXINPUTS", "")
-            os.environ["TEXINPUTS"] = env["TEXINPUTS"]
-            try:
-                pdf_path = doc.generate_pdf(
-                    filepath=output_path, clean_tex=False, compiler="pdflatex"
-                )
-            finally:
-                if original_texinputs:
-                    os.environ["TEXINPUTS"] = original_texinputs
-                else:
-                    os.environ.pop("TEXINPUTS", None)
-
-        print(f"Successfully built PDF: {pdf_path}")
-        return pdf_path
+            print("❌ Tex Compilation failed.")
