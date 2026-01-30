@@ -30,9 +30,7 @@ class JournalPaper:
         # Load xcolor first as it's needed by lstset
         doc.packages.append(Package("xcolor"))
         # NeurIPS style loads Times and natbib automatically
-        doc.packages.append(
-            NoEscape(r"\usepackage[preprint]{../../../common/neurips_2023}")
-        )
+        doc.packages.append(NoEscape(r"\usepackage[preprint]{neurips_2023}"))
         doc.packages.append(Package("inputenc", options="utf8"))
         doc.packages.append(Package("amsmath"))
         doc.packages.append(
@@ -125,24 +123,44 @@ class JournalPaper:
             doc.append(NoEscape(r"\bibliographystyle{plainnat}"))
             doc.append(NoEscape(r"\bibliography{../refs}"))
 
-    def _compile_with_bibliography(self, compiled_dir, output_path):
-        """Run the full LaTeX compilation cycle with BibTeX."""
+    def _compile_with_bibliography(self, doc, compiled_dir, output_path):
+        """Run the full LaTeX compilation cycle with BibTeX using subprocess."""
+        # Set TEXINPUTS to include the common directory
+        common_dir = os.path.abspath(
+            os.path.join(os.path.dirname(__file__), "../../../common")
+        )
+        env = os.environ.copy()
+        env["TEXINPUTS"] = common_dir + os.pathsep + env.get("TEXINPUTS", "")
+
+        # First pdflatex pass
         subprocess.run(
             ["pdflatex", "-interaction=nonstopmode", "main.tex"],
             cwd=compiled_dir,
             check=True,
+            env=env,
         )
-        subprocess.run(["bibtex", "main"], cwd=compiled_dir, check=True)
+
+        # Run bibtex
+        subprocess.run(
+            ["bibtex", "main"], cwd=compiled_dir, check=True, env=env
+        )
+
+        # Second pdflatex pass
         subprocess.run(
             ["pdflatex", "-interaction=nonstopmode", "main.tex"],
             cwd=compiled_dir,
             check=True,
+            env=env,
         )
+
+        # Third pdflatex pass
         subprocess.run(
             ["pdflatex", "-interaction=nonstopmode", "main.tex"],
             cwd=compiled_dir,
             check=True,
+            env=env,
         )
+
         return output_path + ".pdf"
 
     def build(self):
@@ -161,14 +179,30 @@ class JournalPaper:
 
         doc.generate_tex(filepath=output_path)
 
+        # Set TEXINPUTS to include the common directory for PDF generation
+        common_dir = os.path.abspath(
+            os.path.join(os.path.dirname(__file__), "../../../common")
+        )
+        env = os.environ.copy()
+        env["TEXINPUTS"] = common_dir + os.pathsep + env.get("TEXINPUTS", "")
+
         if has_bibliography:
             pdf_path = self._compile_with_bibliography(
-                compiled_dir, output_path
+                doc, compiled_dir, output_path
             )
         else:
-            pdf_path = doc.generate_pdf(
-                filepath=output_path, clean_tex=False, compiler="pdflatex"
-            )
+            # For non-bibliography case, temporarily set TEXINPUTS
+            original_texinputs = os.environ.get("TEXINPUTS", "")
+            os.environ["TEXINPUTS"] = env["TEXINPUTS"]
+            try:
+                pdf_path = doc.generate_pdf(
+                    filepath=output_path, clean_tex=False, compiler="pdflatex"
+                )
+            finally:
+                if original_texinputs:
+                    os.environ["TEXINPUTS"] = original_texinputs
+                else:
+                    os.environ.pop("TEXINPUTS", None)
 
         print(f"Successfully built PDF: {pdf_path}")
         return pdf_path
