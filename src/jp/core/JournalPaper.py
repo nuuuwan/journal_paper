@@ -1,6 +1,7 @@
 import json
 import os
 import shutil
+import subprocess
 from pathlib import Path
 
 from pylatex import Command, Document, Package
@@ -123,30 +124,53 @@ class JournalPaper:
         doc.append(NoEscape(r"\bibliography{../refs}"))
 
     def _compile_with_bibliography(self, doc, output_path):
-        """Run the full LaTeX compilation cycle with BibTeX using PyLaTeX."""
-        # Set TEXINPUTS to include the common directory
-        common_dir = os.path.abspath(
-            os.path.join(os.path.dirname(__file__), "../../../common")
+        """Run the full LaTeX compilation cycle with BibTeX."""
+        # Get the directory containing the tex file
+        tex_dir = os.path.dirname(output_path)
+        base_name = os.path.basename(output_path)
+        tex_file = f"{base_name}.tex"
+
+        # First pass: run pdflatex to create .aux file
+        print("Running pdflatex (pass 1/3)...")
+        result = subprocess.run(
+            ["pdflatex", "-interaction=nonstopmode", tex_file],
+            cwd=tex_dir,
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0:
+            print("❌ First pdflatex pass failed:")
+            print(result.stdout[-2000:])  # Print last 2000 chars
+            raise RuntimeError("pdflatex compilation failed")
+
+        # Run bibtex (don't fail on warnings/errors - it often still produces usable output)
+        print("Running bibtex...")
+        result = subprocess.run(
+            ["bibtex", base_name],
+            cwd=tex_dir,
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0:
+            print(f"⚠️  BibTeX warnings/errors (continuing anyway)")
+
+        # Second pass: pdflatex to incorporate bibliography
+        print("Running pdflatex (pass 2/3)...")
+        subprocess.run(
+            ["pdflatex", "-interaction=nonstopmode", tex_file],
+            cwd=tex_dir,
+            capture_output=True,
+            check=True,
         )
 
-        # Temporarily set TEXINPUTS environment variable
-        original_texinputs = os.environ.get("TEXINPUTS", "")
-        os.environ["TEXINPUTS"] = common_dir + os.pathsep + original_texinputs
-
-        try:
-            # Use generate_pdf with compiler_args to run bibtex
-            doc.generate_pdf(
-                filepath=output_path,
-                clean_tex=False,
-                compiler="pdflatex",
-                compiler_args=["-interaction=nonstopmode"],
-            )
-        finally:
-            # Restore original TEXINPUTS
-            if original_texinputs:
-                os.environ["TEXINPUTS"] = original_texinputs
-            else:
-                os.environ.pop("TEXINPUTS", None)
+        # Third pass: pdflatex to resolve all references
+        print("Running pdflatex (pass 3/3)...")
+        subprocess.run(
+            ["pdflatex", "-interaction=nonstopmode", tex_file],
+            cwd=tex_dir,
+            capture_output=True,
+            check=True,
+        )
 
     def build(self):
         """Build latex files and compile into PDF."""
@@ -164,6 +188,14 @@ class JournalPaper:
         shutil.rmtree(compiled_dir, ignore_errors=True)
         os.makedirs(compiled_dir, exist_ok=True)
         output_path = os.path.join(compiled_dir, "main")
+
+        # Copy neurips_2023.sty to compiled directory
+        common_dir = os.path.abspath(
+            os.path.join(os.path.dirname(__file__), "../../../common")
+        )
+        neurips_sty = os.path.join(common_dir, "neurips_2023.sty")
+        if os.path.exists(neurips_sty):
+            shutil.copy2(neurips_sty, compiled_dir)
 
         doc.generate_tex(filepath=output_path)
         self._compile_with_bibliography(doc, output_path)
