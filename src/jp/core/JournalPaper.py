@@ -117,7 +117,10 @@ class JournalPaper:
             doc.append(NoEscape(r"\maketitle"))
 
         for tex_file in tex_files:
-            doc.append(NoEscape(f"\\input{{../{tex_file.name}}}"))
+            # Read and include the actual content instead of using \input
+            with open(tex_file, "r", encoding="utf-8") as f:
+                content = f.read()
+            doc.append(NoEscape(content))
 
         # NeurIPS uses natbib with specific style
         doc.append(NoEscape(r"\bibliographystyle{plainnat}"))
@@ -185,9 +188,10 @@ class JournalPaper:
         self._add_document_content(doc, tex_files)
 
         compiled_dir = os.path.join(self.dir_path, "__compiled")
+        dir_name = os.path.basename(self.dir_path)
         shutil.rmtree(compiled_dir, ignore_errors=True)
         os.makedirs(compiled_dir, exist_ok=True)
-        output_path = os.path.join(compiled_dir, "main")
+        output_path = os.path.join(compiled_dir, dir_name)
 
         # Copy neurips_2023.sty to compiled directory
         common_dir = os.path.abspath(
